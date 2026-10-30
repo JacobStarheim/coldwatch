@@ -153,6 +153,7 @@ async function drawChart(u, hours) {
   ].filter(Boolean);
   const canvas = document.querySelector(`#unit-${CSS.escape(u.id)} canvas`);
   if (charts[u.id] && charts[u.id].canvas === canvas) {
+    Object.assign(charts[u.id].options.scales.x, { min: xs[0], max: xs[1] });
     charts[u.id].data.datasets = datasets; charts[u.id].update("none"); return;
   }
   charts[u.id]?.destroy();
@@ -160,7 +161,8 @@ async function drawChart(u, hours) {
     type: "line", data: { datasets },
     options: { animation: false, maintainAspectRatio: false, parsing: false, interaction: { mode: "nearest", axis: "x", intersect: false },
       plugins: { legend: { display: false }, tooltip: { callbacks: { title: i => new Date(i[0].parsed.x).toLocaleString(), label: i => `${i.dataset.label}: ${i.parsed.y.toFixed(2)} °C` } } },
-      scales: { x: { type: "linear", ticks: { maxTicksLimit: 6, color: css.getPropertyValue("--muted").trim(),
+      // Pin the axis to the data; otherwise "nice" tick rounding stretches it past now.
+      scales: { x: { type: "linear", min: xs[0], max: xs[1], ticks: { maxTicksLimit: 6, color: css.getPropertyValue("--muted").trim(),
                   callback: v => { const d = new Date(v); return hours > 48 ? d.toLocaleDateString([], { month: "short", day: "numeric" }) : d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }); } },
                   grid: { color: css.getPropertyValue("--border").trim() } },
                 y: { ticks: { color: css.getPropertyValue("--muted").trim() }, grid: { color: css.getPropertyValue("--border").trim() } } } }

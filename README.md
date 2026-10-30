@@ -8,6 +8,19 @@ fridge goes out of range, and it writes the temperature log a kitchen has to kee
 No DT account or hardware is needed to try it. A simulator produces realistic DT events from a
 simple thermal model of a walk-in fridge and a freezer.
 
+![ColdWatch dashboard: a maintenance warning for the walk-in fridge, live temperatures with limits for both units, and recently resolved alerts](docs/dashboard.png)
+
+*Dashboard after 14 simulated days of a slowly failing compressor, plus a door left open.
+The fridge cools down 63 % slower after door openings than it used to, so ColdWatch
+recommends service before the food is at risk.*
+
+<details>
+<summary>HACCP temperature log (printable report)</summary>
+
+![Seven-day temperature log per unit with daily min, average and max, excursions, other events and a signature line](docs/report.png)
+
+</details>
+
 ## Why
 
 Restaurants, shops and hospitals check fridge temperatures by hand and write them on paper,
