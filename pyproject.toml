@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "coldwatch"
+version = "0.1.0"
+description = "Cold-storage monitoring on Disruptive Technologies sensor events: excursion alerts with escalation, predictive compressor maintenance and HACCP-style temperature logs."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.29",
+    "httpx>=0.27",
+    "pyjwt>=2.8",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[tool.setuptools.packages.find]
+include = ["coldwatch*"]
+
+[tool.setuptools.package-data]
+coldwatch = ["static/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

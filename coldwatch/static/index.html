@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ColdWatch</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+  :root { --bg:#f5f6f8; --card:#fff; --text:#1d232a; --muted:#5b6672; --border:#dde2e7; --accent:#0b6bcb;
+          --bad:#c4321c; --bad-bg:#fdeceb; --warn:#9a5b00; --warn-bg:#fff4e0; --ok:#1a7f37; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#121417; --card:#1b1f24; --text:#e6e9ec; --muted:#9aa4ae; --border:#2c333b; --accent:#5aa2f0;
+            --bad:#ff7b6b; --bad-bg:#3a1d1a; --warn:#f0b04a; --warn-bg:#3a2c12; --ok:#4cc26a; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 15px/1.45 -apple-system, system-ui, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); }
+  header { display: flex; flex-wrap: wrap; gap: 12px; justify-content: space-between; align-items: center; padding: 16px 20px; border-bottom: 1px solid var(--border); background: var(--card); }
+  h1 { margin: 0; font-size: 20px; } h2 { font-size: 15px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 24px 0 10px; }
+  .muted { color: var(--muted); margin: 2px 0 0; font-size: 13px; }
+  nav { display: flex; gap: 10px; align-items: center; }
+  a { color: var(--accent); } select, input, button { font: inherit; color: inherit; }
+  select, input { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; }
+  button { background: var(--accent); color: #fff; border: 0; border-radius: 6px; padding: 6px 12px; cursor: pointer; }
+  main { max-width: 1200px; margin: 0 auto; padding: 0 16px 40px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 14px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; }
+  .alert { border-left: 4px solid var(--warn); margin-bottom: 10px; }
+  .alert.critical { border-left-color: var(--bad); }
+  .alert .head { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; }
+  .chip { font-size: 12px; padding: 1px 8px; border-radius: 99px; background: var(--warn-bg); color: var(--warn); font-weight: 600; }
+  .critical .chip.kind { background: var(--bad-bg); color: var(--bad); }
+  .chip.grey { background: var(--bg); color: var(--muted); font-weight: 500; }
+  .ack { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+  .ack input[name=name] { width: 140px; } .ack input[name=action] { flex: 1; min-width: 200px; }
+  .temp { font-size: 34px; font-weight: 650; font-variant-numeric: tabular-nums; }
+  .temp.bad { color: var(--bad); }
+  .row { display: flex; justify-content: space-between; gap: 12px; align-items: flex-end; }
+  .facts { font-size: 13px; color: var(--muted); margin: 8px 0; display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; }
+  .facts b { color: var(--text); font-weight: 600; }
+  .chart { height: 200px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  td, th { padding: 6px 8px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
+  .empty { color: var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>ColdWatch</h1>
+    <p class="muted">Disruptive Technologies sensor events → alerts, predictive maintenance and a HACCP log</p>
+  </div>
+  <nav>
+    <select id="range" aria-label="Chart range">
+      <option value="24">Last 24 h</option>
+      <option value="72">Last 3 days</option>
+      <option value="168">Last 7 days</option>
+      <option value="336">Last 14 days</option>
+    </select>
+    <a href="/report?days=7" target="_blank">HACCP report (7 days)</a>
+  </nav>
+</header>
+<main>
+  <h2>Open alerts</h2>
+  <div id="alerts"><p class="empty">Loading…</p></div>
+  <h2>Units</h2>
+  <div id="units" class="grid"></div>
+  <h2>Recently resolved</h2>
+  <div class="card"><table id="history"></table></div>
+</main>
+<script>
+const KIND = { temp_high: "Too warm", temp_low: "Too cold", door_open: "Door open", offline: "Sensor offline",
+               battery: "Battery", maintenance: "Maintenance recommended" };
+const charts = {};
+let lastAlerts = "";
+
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+const fmt = ts => ts ? new Date(ts * 1000).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "–";
+function ago(ts) {
+  const s = Date.now() / 1000 - ts;
+  if (s < 90) return "just now";
+  if (s < 5400) return `${Math.round(s / 60)} min ago`;
+  if (s < 172800) return `${Math.round(s / 3600)} h ago`;
+  return `${Math.round(s / 86400)} days ago`;
+}
+const dur = (a, b) => { const m = Math.round(((b ?? Date.now() / 1000) - a) / 60); return m >= 60 ? `${Math.floor(m / 60)} h ${m % 60} min` : `${m} min`; };
+const getJSON = url => fetch(url).then(r => { if (!r.ok) throw new Error(r.status); return r.json(); });
+
+function alertCard(a) {
+  const chips = [`<span class="chip kind">${KIND[a.kind] ?? esc(a.kind)}</span>`];
+  if (a.level >= 2) chips.push(`<span class="chip">escalated to manager</span>`);
+  if (a.historical) chips.push(`<span class="chip grey">from history, not paged</span>`);
+  const ack = a.acked_by
+    ? `<p class="muted">Acknowledged by <b>${esc(a.acked_by)}</b>${a.action ? ": " + esc(a.action) : ""}</p>`
+    : `<form class="ack" data-id="${a.id}">
+         <input name="name" placeholder="Your name" required>
+         <input name="action" placeholder="Corrective action (e.g. moved stock to freezer 2)">
+         <button>Acknowledge</button>
+       </form>`;
+  return `<div class="card alert ${a.severity}">
+    <div class="head">${chips.join("")}<b>${esc(a.unit_name ?? "")}</b>
+      <span class="muted">since ${fmt(a.started_at)} (${dur(a.started_at)})</span></div>
+    <div>${esc(a.message)}</div>${ack}</div>`;
+}
+
+async function loadAlerts() {
+  const alerts = await getJSON("/api/alerts?status=open");
+  const box = document.getElementById("alerts");
+  const key = JSON.stringify(alerts);
+  // Don't wipe a half-filled acknowledgement form on refresh.
+  if (key === lastAlerts || box.contains(document.activeElement)) return;
+  lastAlerts = key;
+  box.innerHTML = alerts.length ? alerts.map(alertCard).join("") : `<p class="empty">No open alerts. All units are within limits.</p>`;
+}
+
+document.getElementById("alerts").addEventListener("submit", async e => {
+  e.preventDefault();
+  const f = e.target;
+  // form.name / form.action are the form's own attributes, so read the inputs via elements.
+  const body = { name: f.elements.namedItem("name").value, action: f.elements.namedItem("action").value };
+  const r = await fetch(`/api/alerts/${f.dataset.id}/ack`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  if (r.ok) { lastAlerts = ""; document.activeElement.blur(); refresh(); } else alert("Could not acknowledge: " + r.status);
+});
+
+function unitCard(u) {
+  const over = u.temperature != null && ((u.max_temp != null && u.temperature > u.max_temp) || (u.min_temp != null && u.temperature < u.min_temp));
+  const limits = [u.min_temp != null ? `${u.min_temp} °C` : "–", u.max_temp != null ? `${u.max_temp} °C` : "–"].join(" to ");
+  const door = u.door == null ? "no sensor" : u.door === "open" ? `<b style="color:var(--bad)">open</b> for ${dur(u.door_open_since)}` : "closed";
+  const c = u.cooldown;
+  const rec = c.recent_min_per_c != null
+    ? `${c.recent_min_per_c.toFixed(1)} min/°C (last 3 days, n=${c.n_recent})` + (c.baseline_min_per_c != null ? ` vs ${c.baseline_min_per_c.toFixed(1)} before` : "")
+    : "not enough door openings yet";
+  const sensors = u.sensors.map(s => `${esc(s.name)}: ${s.last_seen ? ago(s.last_seen) : "never"}` +
+      (s.battery_pct != null ? `, battery ${s.battery_pct}%` : "") + (s.signal_strength != null ? `, signal ${s.signal_strength}%` : "")).join("<br>");
+  return `<div class="card" id="unit-${esc(u.id)}">
+    <div class="row"><div><b>${esc(u.name)}</b><div class="muted">limits ${limits}</div></div>
+      <div class="temp ${over ? "bad" : ""}">${u.temperature != null ? u.temperature.toFixed(1) + " °C" : "–"}</div></div>
+    <div class="facts"><span>Door</span><span>${door}</span><span title="Median time to cool back down after a door opening, per °C it warmed up">Cool-down</span><span>${rec}</span>
+      <span>Sensors</span><span>${sensors}</span></div>
+    <div class="chart"><canvas></canvas></div></div>`;
+}
+
+async function drawChart(u, hours) {
+  const data = await getJSON(`/api/readings?unit=${encodeURIComponent(u.id)}&hours=${hours}`);
+  const pts = data.points.map(p => ({ x: p.t * 1000, y: p.v }));
+  const xs = pts.length ? [pts[0].x, pts[pts.length - 1].x] : [];
+  const limit = (v, label, color) => v == null || !xs.length ? null :
+    { label, data: xs.map(x => ({ x, y: v })), borderColor: color, borderDash: [6, 4], pointRadius: 0, borderWidth: 1.5 };
+  const css = getComputedStyle(document.documentElement);
+  const datasets = [
+    { label: "Temperature", data: pts, borderColor: css.getPropertyValue("--accent").trim(), pointRadius: 0, borderWidth: 1.6, tension: 0.2 },
+    limit(data.max_temp, "Max", css.getPropertyValue("--bad").trim()),
+    limit(data.min_temp, "Min", css.getPropertyValue("--muted").trim()),
+  ].filter(Boolean);
+  const canvas = document.querySelector(`#unit-${CSS.escape(u.id)} canvas`);
+  if (charts[u.id] && charts[u.id].canvas === canvas) {
+    charts[u.id].data.datasets = datasets; charts[u.id].update("none"); return;
+  }
+  charts[u.id]?.destroy();
+  charts[u.id] = new Chart(canvas, {
+    type: "line", data: { datasets },
+    options: { animation: false, maintainAspectRatio: false, parsing: false, interaction: { mode: "nearest", axis: "x", intersect: false },
+      plugins: { legend: { display: false }, tooltip: { callbacks: { title: i => new Date(i[0].parsed.x).toLocaleString(), label: i => `${i.dataset.label}: ${i.parsed.y.toFixed(2)} °C` } } },
+      scales: { x: { type: "linear", ticks: { maxTicksLimit: 6, color: css.getPropertyValue("--muted").trim(),
+                  callback: v => { const d = new Date(v); return hours > 48 ? d.toLocaleDateString([], { month: "short", day: "numeric" }) : d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }); } },
+                  grid: { color: css.getPropertyValue("--border").trim() } },
+                y: { ticks: { color: css.getPropertyValue("--muted").trim() }, grid: { color: css.getPropertyValue("--border").trim() } } } }
+  });
+}
+
+let unitKeys = "";
+async function loadUnits() {
+  const units = await getJSON("/api/units");
+  const hours = document.getElementById("range").value;
+  const box = document.getElementById("units");
+  const html = units.map(unitCard).join("");
+  const keys = units.map(u => u.id).join("|");
+  if (!units.length) { box.innerHTML = `<p class="empty">No sensor data yet. Run the simulator or point a DT Data Connector at /dt/events.</p>`; return; }
+  if (keys !== unitKeys) { box.innerHTML = html; unitKeys = keys; }
+  else units.forEach(u => {  // update text in place so charts keep their canvas
+    const card = document.getElementById(`unit-${u.id}`); const tmp = document.createElement("div"); tmp.innerHTML = unitCard(u);
+    card.querySelector(".row").replaceWith(tmp.querySelector(".row")); card.querySelector(".facts").replaceWith(tmp.querySelector(".facts"));
+  });
+  await Promise.all(units.map(u => drawChart(u, hours)));
+}
+
+async function loadHistory() {
+  const rows = await getJSON("/api/alerts?status=resolved&limit=12");
+  document.getElementById("history").innerHTML = rows.length
+    ? `<tr><th>When</th><th>Unit</th><th>Event</th><th>Duration</th><th>Acknowledged</th></tr>` +
+      rows.map(a => `<tr><td>${fmt(a.started_at)}</td><td>${esc(a.unit_name ?? "")}</td><td>${KIND[a.kind] ?? esc(a.kind)}</td>
+        <td>${dur(a.started_at, a.resolved_at)}</td><td>${a.acked_by ? esc(a.acked_by) : "–"}</td></tr>`).join("")
+    : `<tr><td class="empty">Nothing yet.</td></tr>`;
+}
+
+async function refresh() {
+  try { await Promise.all([loadAlerts(), loadUnits(), loadHistory()]); }
+  catch (e) { console.error(e); }
+}
+document.getElementById("range").addEventListener("change", () => { Object.values(charts).forEach(c => c.destroy()); for (const k in charts) delete charts[k]; unitKeys = ""; refresh(); });
+refresh();
+setInterval(refresh, 10000);
+</script>
+</body>
+</html>
